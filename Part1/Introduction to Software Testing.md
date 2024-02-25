@@ -9,7 +9,7 @@ YouTubeVideo('C8_pjdl7pK0')
 
 [![IMAGE ALT TEXT HERE](https://img.youtube.com/vi/C8_pjdl7pK0/0.jpg)](https://www.youtube.com/watch?v=C8_pjdl7pK0)
 
-이 장(그리고 이 책)은 테스트에 관한 교과서를 대체하도록 설정되지 않았다. 권장 읽기는 마지막에 있는 [background](#Background)를 참조하라.
+이 장(그리고 이 책)은 테스트에 관한 교과서를 대체하도록 설정되지 않았다. 권장 읽기는 마지막에 있는 [background](#background)를 참조하라.
 
 ## Simple Testing
 
@@ -26,10 +26,28 @@ def my_sqrt(x):
     return approx
 ```
 
-이제 당신의 일은 이 기능이 실제로 자신이 주장하는 것을 수행하는지 여부를 확인하는 것이 당신의 일이다.
+이제 여러분의 일은 이 기능이 실제로 자신이 주장하는 것을 수행하는지 여부를 확인하는 것이 당신의 일이다.
 
+### Understanding Python Programs
 
+만약 여러분이 파이썬에 처음이라면, 아마 위의 코드가 무슨 일을 하는지 정확히 이해해야만 할 것이다. 여기선 파이썬이 어떻게 작동하는지 알기 위해 [파이썬 튜토리얼](https://docs.python.org/3/tutorial/)을 추천한다. 이 코드를 이해하기 위한 가장 중요한 것 3가지는 다음과 같다:
 
+1. 파이썬은 들여 쓰기를 통해 프로그램을 구성하므로, 함수와 while 구문은 들여씀으로써 정의된다.
+2. 파이썬은 동적 타입으로, x, approx 혹은 guess같은 변수들의 타입이 런타임에 결정됨을 뜻한다.
+3. 파이썬의 구문적 기능들의 대부분은 다른 흔한 언어들에서 영감을 받았다, 예를 들어, 제어 구조(while, if), 할당(=), or 비교(==, !=, <).
 
+이를 가지고, 위 코드가 뭘 하는지 이미 알 수 있을 것이다. x/2를 가진 guess로 시작해서, approx의 값이 더 이상 바뀌지 않을 때까지 approx에 점점 더 나은 근사치를 산출해낸다. 이 값이 마지막으로 return되는 값이다.
+
+### Running a Function
+
+my_sqrt()가 정확히 작동하는지 알아내기 위해, 몇가지 값을 통해 테스트할 수 있다. 예를 들어, x = 4일 경우 이는 정확한 값을 생산해낸다.
+
+<code>
+my_sqrt(4)
+</code>
+
+> 2.0
+
+위 my_sqrt(4)
 
 ## Background
