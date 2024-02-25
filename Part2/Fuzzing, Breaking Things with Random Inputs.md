@@ -11,7 +11,10 @@ https://youtu.be/YjO1pIx7wS4
 
 우리는 이러한 전제 조건을 명시적으로 만들 수 있다. 먼저, 우리는 notebook에서 작동하기 위해 필요한 일반적인 패키지들을 import할 것이다.
 
-> import [bookutils.setup](https://github.com/uds-se/fuzzingbook//tree/master/notebooks/shared/bookutils)
+
+<code>
+    import <a href="https://github.com/uds-se/fuzzingbook//tree/master/notebooks/shared/bookutils">bookutils.setup</a>
+</code>
 
 > from [typing](https://docs.python.org/3/library/typing.html) import Dict, Tuple, Union, List, Any
 
@@ -24,7 +27,7 @@ https://youtu.be/YjO1pIx7wS4
 이 챕터에서 제공된 코드를 사용하기 위해서, 다음을 쓴다;
 
 ```jsx
->>> from [fuzzingbook.Fuzzer](https://www.fuzzingbook.org/html/Fuzzer.html) import <identifier>
+>>> from [`fuzzingbook.Fuzzer`](https://www.fuzzingbook.org/html/Fuzzer.html) import <identifier>
 ```
 
 그러면 그 다음과 같은 기능을 사용할 수 있다.
