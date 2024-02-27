@@ -103,5 +103,134 @@ https://youtu.be/YjO1pIx7wS4
 - `for i in range(start, end): body` –
 - `chr(n)` – return a character with ASCII code `n`
 
-무
+무작위 숫자를 사용하기 위해, 우리는 각각의 모듈을 import해야 한다.
+
+```python
+import random
+```
+
+여기 실제 fuzzer() 함수가 나온다.
+
+```python
+def fuzzer(max_length: int = 100, char_start: int = 32, char_range: int = 32) -> str:
+    """A string of up to `max_length` characters
+       in the range [`char_start`, `char_start` + `char_range`)"""
+    string_length = random.randrange(0, max_length + 1)
+    out = ""
+    for i in range(0, string_length):
+        out += chr(random.randrange(char_start, char_start + char_range))
+    return out
+```
+
+기본 인자와 함께, fuzzer() 함수는 무작위 문자를 가진 문자열을 return한다.
+
+```python
+fuzzer()
+```
+
+> '!7#%"*#0=)\$;%6*;>638:*>80"=</>(/*:-(2<4 !:5*6856&?""11<7+%<%7,4.8,*+&,,\$,."'
+
+Bart Miller는 이러한 무작위하고, 구조가 없는 데이터를 "fuzz"라고 명명했다. 이제 이 "fuzz" 문자열이 특정 입력 포맷, 다시 말해, 쉼표로 구분된 값의 목록, 혹은 이메일 주소를 예상하는 프로그램의 입력이라고 가정하자. 프로그램은 이러한 입력은 아무 문제 없이 처리할 수 있을 것인가?
+
+만약 위의 fuzzing 입력이 이미 흥미롭다면, fuzzing이 쉽게 다른 종류의 입력을 생산하도록 세팅될 수 있음을 고려하자. 예를 들어, 우리는 fuzzer()가 소문자만을 생산하도록 할 수 있다. 우리는 ord(c)를 사용해 문자 c의 ASCII 코드를 return한다.
+
+```python
+fuzzer(1000, ord('a'), 26)
+```
+
+> 'zskscocrxllosagkvaszlngpysurezehvcqcghygphnhonehczraznkibltfmocxddoxcmrvatcleysksodzlwmzdndoxrjfqigjhqjxkblyrtoaydlwwisrvxtxsejhfbnforvlfisojqaktcxpmjqsfsycisoexjctydzxzzutukdztxvdpqbjuqmsectwjvylvbixzfmqiabdnihqagsvlyxwxxconminadcaqjdzcnzfjlwccyudmdfceiepwvyggepjxoeqaqbjzvmjdlebxqvehkmlevoofjlilegieeihmetjappbisqgrjhglzgffqrdqcwfmmwqecxlqfpvgtvcddvmwkplmwadgiyckrfjddxnegvmxravaunzwhpfpyzuyyavwwtgykwfszasvlbwojetvcygectelwkputfczgsfsbclnkzzcjfywitooygjwqujseflqyvqgyzpvknddzemkegrjjrshbouqxcmixnqhgsgdwgzwzmgzfajymbcfezqxndbmzwnxjeevgtpjtcwgbzptozflrwvuopohbvpmpaifnyyfvbzzdsdlznusarkmmtazptbjbqdkrsnrpgdffemnpehoapiiudokczwrvpsonybfpaeyorrgjdmgvkvupdtkrequicexqkoikygepawmwsdcrhivoegynnhodfhryeqbebtbqnwhogdfrsrksntqjbocvislhgrgchkhpaiugpbdygwkhrtyniufabdnqhtnwreiascfvmuhettfpbowbjadfxnbtzhobnxsnf'
+
+프로그램이 입력으로 식별자를 예상하고 있다고 가정하자. 이렇게 긴 식별자를 기대할까?
+
+## Fuzzing External Programs
+
+우리가 fuzz된 입력으로 외부 프로그램을 실제로 실행하면 무슨 일이 일어날지 보자. 이를 위해, 두 단계로 진행한다. 먼저, fuzz된 검사 데이터로 입력 파일을 만든다; 그 다음 선택된 프로그램에 입력 파일을 준다.
+
+### Creating Input Files
+
+파일 시스템을 어지럽히지 않도록 임시 파일 이름을 얻겠다.
+
+```python
+import os
+import tempfile
+```
+
+```python
+basename = "input.txt"
+tempdir = tempfile.mkdtemp()
+FILE = os.path.join(tempdir, basename)
+print(FILE)
+```
+
+> /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt
+
+이제 이 파일을 쓰기를 위해 열 수 있다. 파이썬 open() 함수는 임의의 내용을 쓸 수 있도록 열어 준다. 이는 흔히 파일이 필요없어지자마자 파일을 닫는 것을 보장하는 with문과 같이 사용된다.
+
+```python
+data = fuzzer()
+with open(FILE, "w") as f:
+    f.write(data)
+```
+
+파일이 실제로 만들어진 것은 파일의 내용을 읽음으로써 검증될 수 있다.
+
+```python
+contents = open(FILE).read()
+print(contents)
+assert(contents == data)
+```
+
+> \<?6&" !3'7-5\>18%55*,5
+
+### Invoking External Programs
+
+이제 입력 파일이 있으니, 프로그램을 그것을 가지고 호출할 수 있다. 재미 삼아, 산술식을 받고 평가하는 bc 계산기 프로그램을 검사한다.
+
+bc를 호출하기 위해, Python의 subprocess 모듈을 사용한다. 다음은 이것이 어떻게 작동하는지다.
+
+```python
+import os
+import subprocess
+```
+
+```python
+program = "bc"
+with open(FILE, "w") as f:
+    f.write("2 + 2\n")
+result = subprocess.run([program, FILE],
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        universal_newlines=True) # Will be "text" in Python 3.7
+```
+
+결과로부터, 프로그램의 출력을 검사할 수 있다. bc의 경우, 산술식 표현을 평가한 것의 결과이다.
+
+```python
+result.stdout
+```
+
+> '4\n'
+
+여기서 또한 상태를 검사할 수 있다. 0의 값은 프로그램이 정확히 종료되었음을 가리킨다.
+
+```python
+result.returncode
+```
+
+> 0
+
+모든 에러 메세지는 results.stderr에서 사용가능하다.
+
+```python
+result.stderr
+```
+
+> ''
+
+bc 대신, 여러분이 좋아하는 모든 프로그램을 실제로 넣어볼 수 있다. 그러나 주의할 점은, 여러분의 프로그램이 여러분의 시스템을 바꿀 수 있거나 심지어 해를 끼칠 수 있을 경우 fuzz된 입력에 이를 정확히 수행할 수 있는 데이터 혹은 명령이 포함됐을 가능성이 상당히 있다.
+
+예를 들어, rm 명령을 fuzzing 한다고 했을 때, fuzzer()가 시스템 내의 모든 파일을 지울 인자를 생성할 확률은 대략 1/1000 정도의 확률이다. 주어진 fuzz 검사는 보통 몇백만 번 실행되므로, 이러한 확률은 꽤나 위협적이다.
+
+### Long-Running Fuzzing
 
