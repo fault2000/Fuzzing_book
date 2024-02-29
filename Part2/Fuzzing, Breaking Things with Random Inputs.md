@@ -234,3 +234,294 @@ bc 대신, 여러분이 좋아하는 모든 프로그램을 실제로 넣어볼 
 
 ### Long-Running Fuzzing
 
+이제 프로그램에 많은 수의 입력을 넣어 어디선가 충돌이 일어날지 보자. 우리는 입력 데이터와 실제 결과를 짝지어 runs이라는 변수에 담아 모든 결과를 저장한다.(이를 실행하는 것은 조금 걸릴 수도 있다.)
+
+```python
+trials = 100
+program = "bc"
+
+runs = []
+
+for i in range(trials):
+    data = fuzzer()
+    with open(FILE, "w") as f:
+        f.write(data)
+    result = subprocess.run([program, FILE],
+                            stdin=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            universal_newlines=True)
+    runs.append((data, result))
+```
+
+이제 몇몇 통계의 경우 runs를 쿼리할 수 있다. 예를 들어, 얼마나 많은 실행이 실제로 통과했는지 쿼리할 수 있다 -- 이는, 에러 메세지가 없는 경우들이다. 여기선 list comprehension을 사용한다: for *element* in *list* if *condition* 형태의 표현식은 *list*로부터 *element*를 각각 받아 *condition*이 참인지 평가된 표현식의 리스트를 return한다(사실, list comprehension은 list generator를 return 하지만, 우리의 목적에선 generator는 list처럼 행동한다). 여기서, 우리는 *condition*이 성립하는 모든 *element*의 경우 *expression*은 1이 된다.
+
+```python
+sum(1 for (data, result) in runs if result.stderr == " ")
+```
+
+> 9
+
+대부분의 입력이 유효하지 않은 것처럼 보인다 - 크게 놀랄 일은 아닌 것이, 무작위 입력이 유효한 산술적 표현식을 담을 것 같지 않기 때문이다.
+
+첫 에러 메세지를 살펴보자.
+
+```python
+errors = [(data, result) for (data, result) in runs if result.stderr != ""]
+(first_data, first_result) = errors[0]
+
+print(repr(first_data))
+print(first_result.stderr)
+```
+
+> '5&8>"86,?"/7!1%5-**&-\$&)\$91;"21(\'8"(%\$4,("(&!67%89\$!.?(*(96(28\$=6029:<:\$(6 !-+2622(&4'
+>
+> Parse error: bad character '&'
+> &nbsp;&nbsp;&nbsp;&nbsp;/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1
+
+illegal character, parse error, 혹은 syntax error말고 다른 메세지(다시 말해, crash 혹은 you found a fatal bug같은 메세지)를 가진 실행이 있는가? 많이는 없을 것이다.
+
+```python
+[result.stderr for (data, result) in runs if
+ result.stderr != ""
+ and "illegal character" not in result.stderr
+ and "parse error" not in result.stderr
+ and "syntax error" not in result.stderr]
+```
+
+> ["\nParse error: bad character '&'\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n",
+> '\nParse error: bad expression\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad expression\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad expression\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad expression\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad expression\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad expression\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad expression\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad expression\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> "\nParse error: bad character '&'\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n",
+> '\nParse error: bad assignment: left side must be scale, ibase, obase, seed, last, var, or array element\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad expression\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> "\nParse error: bad character '?'\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n",
+> "\nParse error: bad character '''\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n",
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> "\nParse error: bad character '?'\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n",
+> "\nParse error: bad character ':'\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n",
+> "\nParse error: bad character '&'\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n",
+> "\nParse error: bad character ':'\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n",
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad expression\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> "\nParse error: bad character '?'\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n",
+> '\nParse error: bad assignment: left side must be scale, ibase, obase, seed, last, var, or array element\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad expression\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> "\nParse error: bad character '&'\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n",
+> "\nParse error: bad character '''\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n",
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad expression\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> "\nParse error: bad character '''\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n",
+> "\nParse error: bad character '''\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n",
+> "\nParse error: bad character '&'\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n",
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> "\nParse error: bad character ':'\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n",
+> "\nParse error: bad character ':'\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n",
+> '\nParse error: bad expression\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad expression\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> "\nParse error: bad character '&'\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n",
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad expression\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad expression\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad expression\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> "\nParse error: bad character ':'\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n",
+> "\nParse error: bad character ':'\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n",
+> '\nParse error: bad expression\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad expression\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad expression\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> "\nParse error: bad character '&'\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n",
+> "\nParse error: bad character '&'\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n",
+> "\nParse error: bad character '''\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n",
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad expression\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> "\nParse error: bad character ':'\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n",
+> '\nParse error: bad expression\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> "\nParse error: bad character '''\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n",
+> '\nParse error: bad expression\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> "\nParse error: bad character ':'\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n",
+> "\nParse error: bad character '''\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n",
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad expression\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> "\nParse error: bad character '&'\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n",
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> "\nParse error: bad character '?'\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n",
+> '\nParse error: bad expression\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad expression\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad expression\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> "\nParse error: bad character ':'\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n",
+> "\nParse error: bad character '''\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n",
+> '\nParse error: bad expression\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n',
+> '\nParse error: bad token\n    /var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/tmpnds9g27_/input.txt:1\n\n']
+
+bc에 의해 제기된 충돌은 단순히 충돌일 수도 있다. 운 나쁘게도, return 코드는 0이 아니다.
+
+```python
+sum(1 for (data, result) in runs if result.returncode != 0)
+```
+
+> 91
+
+위 bc 테스트 실행을 더 실행되도록 나두면 어떻게 될까? 테스트가 실행되는 동안, 1989년에 최신 기술이 어땠는지 살펴보자.
+
+## Bugs Fuzzers Find
+
+Miller와 그의 학생들이 fuzzing을 본격적으로 시작해보았을 때, 1/3 이상의 UNIX utilities이 오류를 일으켰다.
+
+이러한 UNIX 유틸리티들이 네트워크 입력을 처리하는 스크립트에서 사용되었다는 걸 고려했을 때 이는 충격적인 결과였다. 많은 개발자들이 그들만의 fuzzer를 빠르게 만들고 실행했으며, 서둘러 보고된 오류들을 고쳤으며, 외부 입력을 더이상 믿어선 안 된다는 것을 배웠다.
+
+Miller의 fuzzing 실험에서 무슨 종류의 문제가 발견되었을까? 이는 바로 1990년대 개발자들이 저지른 실수를 오늘날에도 반복하고 있다는 것이다.
+
+### Buffer Overflows
+
+많은 프로그램들이 입력과 입력 요소에 대한 최대 길이가 내장되어 있다. C 같은 언어에서, 프로그램(혹은 개발자)가 알아채지 못하면 이러한 길이를 초과하는 것은 쉬우며 소위 **버퍼 오버플로우**를 발생시킨다. 예를 들어 다음 코드는 input 문자열이 8 문자를 넘어가더라도 weekday라는 문자열에 복사한다.
+
+```c
+char weekday[9]; // 8 characters + trailing '\0' terminator
+strcpy(weekday, input);
+```
+
+아이러니하게도, 만약 input이 "Wednesday"(9글자)면 이미 실패한다. 모든 초과된 문자(여기선, 'y'와 다음 '\0'string terminator)는 weekday 뒤에 메모리 내의 존재하는 값과 상관없이 단순히 복제되어 임의의 행동을 일으킨다; 'n'에서 'y'로 설정될 수 있는 boolean 문자 변수일수도 있다. fuzzing에서는 임의의 긴 입력과 입력 요소를 생산하는 것은 매우 쉽다.
+
+파이썬 함수 내에서 이러한 버퍼 오버플로우 행동을 쉽게 시뮬레이팅할 수 있다.
+
+```python
+def crash_if_too_long(s):
+    buffer = "Thursday"
+    if len(s) > len(buffer):
+        raise ValueError
+```
+
+이건 매우 빠르게 충돌을 일으킨다.
+
+```python
+from ExpectError import ExpectError
+```
+
+```python
+trials = 100
+with ExpectError():
+    for i in range(trials):
+        s = fuzzer()
+        crash_if_too_long(s)
+```
+
+> ```bash
+> Traceback (most recent call last):
+>   File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_72058/292568387.py", line 5, in <cell line: 2>
+>     crash_if_too_long(s)
+>   File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_72058/2784561514.py", line 4, in crash_if_too_long
+>     raise ValueError
+> ValueError (expected)
+> ```
+
+위 코드의 with ExpectError() 줄은 에러 메세지가 출력되도록 보장하지만 실행은 계속된다; 이는 "예상된" 에러와 "예상되지 않은" 에러를 다른 코드 예시에서 구분하기 위함이다.
+
+### Missing Error Checks
+
+많은 프로그래밍 언어가 exception을 가지고 있진 않지만, 대신 예외적인 상황에서 특별한 **에러 코드**를 return하는 함수를 가진다. 예를 들어, C 언어의 함수 getchar()는 보통 표준 입력으로부터 문자를 return한다; 만약 더 이상 사용가능한 입력이 없을 경우, 특별한 값인 EOF(end of file)을 return한다. 이제 개발자가 다음 문자에 대한 입력을 스캔하고, 공백 문자를 읽을 때까지 getchar()로 문자를 읽는다고 가정해보자.
+
+```c
+while (getchar() != ' ');
+```
+
+퍼징으로 완벽히 구현가능한 것처럼 입력이 조기에 종료되면 무슨 일이 일어날까? 글쎄, getchar()은 EOF를 return하고, 다시 불러질 때마다 EOF를 계속해서 return할 것이다; 그래서 위 코드는 단순히 무한 루프에 들어갈 것이다.
+
+다시, 우리는 이러한 놓친 에러 검사를 시뮬레이팅할 수 있다. 여기 만약 입력에 공백 문자가 나타나지 않는다면 효율적으로 기다리는 함수가 있다.
+
+```python
+def hang_if_no_space(s):
+    i = 0
+    while True:
+        if i < len(s):
+            if s[i] == ' ':
+                break
+        i += 1
+```
+
+우리의 [Introduction to Testing](/Part1/Introduction%20to%20Software%20testing.md)의 타임아웃 메커니즘을 사용하여, 조금의 시간 후에 이 함수를 interrupt할 수 있다. 그리고 맞다, 많지 않은 fuzzing 입력 후에 이것은 대기 상태가 된다.
+
+```python
+from ExpectError import ExpectTimeout
+```
+
+```python
+trials = 100
+with ExpectTimeout(2):
+    for i in range(trials)
+    s = fuzzer()
+    hang_if_no_space(s)
+```
+
+> ```bash
+> Traceback (most recent call last):
+> File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_72058/3194687366.py", line 5, in <cell line: 2>
+>   hang_if_no_space(s)
+> File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_72058/3035466707.py", line 3, in hang_if_no_space
+>   while True:
+> File "/Users/zeller/Projects/fuzzingbook/notebooks/Timeout.ipynb", line 43, in timeout_handler
+>   raise TimeoutError()
+> TimeoutError (expected)
+> ```
+
+위 코드의 with ExpectTimeout() 줄은 근접한 코드의 실행이 2초 후에 에러 메세지를 출력하며 interrupt됨을 보장한다.
+
+## Rogue Numbers
+
+fuzzing과 함께라면 모든 종류의 흥미로운 행동을 일으키는 **흔하지 않은 값**을 입력으로 생성하는 것은 쉽다. 다음 C 언어 코드를 보자, 이것은 먼저 입력으로부터 버퍼 크기를 읽고, 주어진 크기의 버퍼를 할당한다.
+
+```c
+char *read_input() {
+    size_t size = read_buffer_size();
+    char *buffer = (char *)malloc(size);
+    // fill buffer
+    return (buffer);
+}
+```
+
+만약 size가 매우 커서 프로그램 메모리를 초과하면 무슨 일이 일어날까? size가 다음 입력되는 문자의 수보다 작으면 무슨 일이 일어날까? size가 음수라면? 무작위 수를 여기서 제공함으로써 fuzzing은 모든 종류의 손상을 생성할 수 있다.
+
+다시, 파이썬에서 우리는 이러한 rogue number를 쉽게 시뮬레이트 해볼 수 있다. 함수 collapse_if_too_large()는 주어진 값(문자열)이 정수로 변환된 후 너무 크면 실패한다.
+
+```python
+def collapse_if_too_large(s):
+    if int(s) > 1000:
+        raise ValueError
+```
+
+fuzzer()를 이용해 정수의 문자열을 생성할 수 있다.
+
+```python
+long_number = fuzzer(100, ord('0'), 10)
+print(long_number)
+```
+
+> 7056414967099541967374507745748918952640135045
+
