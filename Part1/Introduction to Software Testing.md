@@ -299,16 +299,18 @@ with ExpectTimeout(1):
     sqrt_program("-1")
 ```
 
+> ```bash
 > Traceback (most recent call last):
-> &nbsp;&nbsp;&nbsp;&nbsp;File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_71717/1288144681.py", line 2, in <cell line: 1>
-> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;sqrt_program("-1")
-> &nbsp;&nbsp;&nbsp;&nbsp;File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_71717/449782637.py", line 3, in sqrt_program
-> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;print('The root of', x, 'is', my_sqrt(x))
-> &nbsp;&nbsp;&nbsp;&nbsp;File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_71717/2661069967.py", line 5, in my_sqrt
-> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;while approx != guess:
-> &nbsp;&nbsp;&nbsp;&nbsp;File "/Users/zeller/Projects/fuzzingbook/notebooks/Timeout.ipynb", line 43, in timeout_handler
-> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;raise TimeoutError()
+>   File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_71717/1288144681.py", line 2, in <cell line: 1>
+>     sqrt_program("-1")
+>   File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_71717/449782637.py", line 3, in sqrt_program
+>     print('The root of', x, 'is', my_sqrt(x))
+>   File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_71717/2661069967.py", line 5, in my_sqrt
+>     while approx != guess:
+>   File "/Users/zeller/Projects/fuzzingbook/notebooks/Timeout.ipynb", line 43, in timeout_handler
+>     raise TimeoutError()
 > TimeoutError (expected)
+> ```
 
 위 메세지는 에러 메세지로, 무언가 잘못되었음을 가리킨다. 이는 함수의 call stack과 에러 당시에 활성화된 줄의 리스트를 보여준다. 제일 아래의 줄이 마지막으로 실행된 줄이다; 위로 갈수록 함수 호출을 나타내며 - 우리의 경우 my_sqrt(x)까지 간다.
 
@@ -344,12 +346,14 @@ with ExpectError():
     sqrt_program("xyzzy")
 ```
 
+> ```bash
 > Traceback (most recent call last):
-> &nbsp;&nbsp;&nbsp;&nbsp;File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_71717/1336991207.py", line 2, in <cell line: 1>
-> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;sqrt_program("xyzzy")
-> &nbsp;&nbsp;&nbsp;&nbsp;File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_71717/3211514011.py", line 2, in sqrt_program
-> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;x = int(arg)
+>   File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_71717/1336991207.py", line 2, in <cell line: 1>
+>     sqrt_program("xyzzy")
+>   File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_71717/3211514011.py", line 2, in sqrt_program
+>     x = int(arg)
 > ValueError: invalid literal for int() with base 10: 'xyzzy' (expected)
+> ```
 
 여기 잘못된 입력을 검사하는 또다른 버전이 있다.
 
@@ -397,12 +401,14 @@ with ExpectError():
     root = my_sqrt(0)
 ```
 
+> ```bash
 > Traceback (most recent call last):
-> &nbsp;&nbsp;&nbsp;&nbsp;File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_71717/820411145.py", line 2, in <cell line: 1>
-> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;root = my_sqrt(0)
-> &nbsp;&nbsp;&nbsp;&nbsp;File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_71717/2661069967.py", line 7, in my_sqrt
-> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;guess = (approx + x / approx) / 2
+>   File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_71717/820411145.py", line 2, in <cell line: 1>
+>     root = my_sqrt(0)
+>   File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_71717/2661069967.py", line 7, in my_sqrt
+>     guess = (approx + x / approx) / 2
 > ZeroDivisionError: float division by zero (expected)
+> ```
 
 지금까지의 우리의 검사에선, 이 상태를 검사해오진 않으며, 이는 √0 = 0으로 빌드된 프로그램이 놀랍게도 실패함을 의미한다. 하지만 우리의 무작위 생성기를 1-1000000보다 0-1000000의 범위로 입력을 생산하도록 설정하였다하더라도, 우연히 0의 값을 생산할 확률은 여전히 100만 분의 1이다. 만약 함수의 행동이 몇몇 소수의 개별적인 값에서 근본적으로 다르다면, 보통 무작위 검사는 이러한 값을 생산해낼 확률이 매우 적다.
 
@@ -429,12 +435,14 @@ with ExpectError():
     root = my_sqrt_fixed(-1)
 ```
 
+> ```bash
 > Traceback (most recent call last):
-> &nbsp;&nbsp;&nbsp;&nbsp;File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_71717/305965227.py", line 2, in <cell line: 1>
-> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;root = my_sqrt_fixed(-1)
-> &nbsp;&nbsp;&nbsp;&nbsp;File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_71717/3001478627.py", line 2, in my_sqrt_fixed
-> &nbsp;&nbsp;&nbsp;&nbsp;assert 0 <= x
+>   File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_71717/305965227.py", line 2, in <cell line: 1>
+>     root = my_sqrt_fixed(-1)
+>   File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_71717/3001478627.py", line 2, in my_sqrt_fixed
+>   assert 0 <= x
 > AssertionError (expected)
+> ```
 
 여전히, 광범위한 범위의 검사가 프로그램의 정확성에 높은 자신감을 우리에게 줄 수 있지만, 이는 모든 미래의 실행이 정확한지에 대한 보장을 제공하지는 못함을 기억해야만 한다. 모든 결과를 검사하는 런타임 검증조차, 결과를 도출해야만 결과가 정확함을 보장할 수 있을 뿐이다; 하지만 미래의 실행이 실패한 검사로 이어지지 않을 거라는 보장은 없다. 이 글을 쓰면서, 나는 my_sqrt_fixed(x)가 모든 유한한 수 x에 대해 √x의 정확한 구현임을 믿지만, 확신할 수는 없다.
 
