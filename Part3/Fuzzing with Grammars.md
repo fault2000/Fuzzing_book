@@ -145,9 +145,250 @@ DIGIT_GRAMMAR = {
 SimpleGrammar = Dict[str, List[str]]
 ```
 
+그러나 이 장 뒷부분에서 소개할 옵션 속성 추가 기능을 사용하면 expansion을 문자열과 옵션으로 짝지을 수 있으며, 여기서 옵션은 문자열을 값에 매핑하는 것이다:
 
+```python
+Option = Dict[str, Any]
+```
+
+따라서, expansion은 문자열이거나 문자열과 옵션의 짝일 수도 있다.
+
+```python
+Expansion = Union[str, Tuple[str, Option]]
+```
+
+이를 통해 우리는 문법을 Expansion 리스트의 매핑된 문자열으로 정의할 수 있다.
 
 </div>
 </details>
 
-## A Grammar Toolbox
+우리는 각 symbol(문자열)이 expansion의 리스트(문자열)에 매핑되는 문법 유형 내에서 문법 구조를 포착할 수 있다:
+
+```python
+Grammar = Dict[str, List[Expansion]]
+```
+
+이 문법 유형을 통해, 산술식의 전체 문법은 다음처럼 생겼다:
+
+```python
+EXPR_GRAMMAR: Grammar = {
+    "<start>":
+        ["<expr>"],
+
+    "<expr>":
+        ["<term> + <expr>", "<term> - <expr>", "<term>"],
+
+    "<term>":
+        ["<factor> * <term>", "<factor> / <term>", "<factor>"],
+
+    "<factor>":
+        ["+<factor>",
+         "-<factor>",
+         "(<expr>)",
+         "<integer>.<integer>",
+         "<integer>"],
+
+    "<integer>":
+        ["<digit><integer>", "<digit>"],
+
+    "<digit>":
+        ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+}
+```
+
+문법에서, 모든 symbol은 정확히 하나로 정의될 수 있다. 모든 규칙에 그것의 symbol로 접근할 수 있다...
+
+```python
+EXPR_GRAMMAR["<digit>"]
+```
+
+> ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
+
+...그리고 문법 내에 symbol이 있는지 확인할 수 있다:
+
+```python
+"<identifier>" in EXPR_GRAMMAR
+```
+
+> False
+
+우리는 규칙의 왼쪽(즉, 매핑의 key)이 항상 하나의 기호라고 가정한다. 이것은 우리의 문법에 context-free한 특성을 주는 속성이다.
+
+## Some Definitions
+
+표준 시작 기호는 \<start\>로 가정한다:
+
+```python
+START_SYMBOL = "<start>"
+```
+
+다루기 쉬운 nonterminals() 함수는 expansion으로부터 nonterminal symbol(예를 들어, 공백을 제외한 \<와 \>의 사이 모든 것)의 리스트를 추출한다.
+
+```python
+import re
+```
+
+```python
+RE_NONTERMINAL = re.compile(r'(<[^<> ]*>)])')
+```
+
+```python
+def nonterminals(expansion):
+    # In later chapters, we allow expansions to be tuples,
+    # with the expansion being the first element
+    if isinstance(expansion, tuple):
+        expansion = expansion[0]
+
+    return RE_NONTERMINAL.findall(expansion)
+```
+
+```python
+assert nonterminals("<term> * <factor>") == ["<term>", "<factor>"]
+assert nonterminals("<digit><integer>") == ["<digit>", "<integer>"]
+assert nonterminals("1 < 3 > 2") == []
+assert nonterminals("1 <3> 2") == ["<3>"]
+assert nonterminals("1 + 2") == []
+assert nonterminals(("<1>", {'option': 'value'})) == ["<1>"]
+```
+
+이와 마찬가지로, is_nonterminal()은 symbol이 nonterminal인지 확인한다:
+
+```python
+def is_nonterminal(s):
+    return RE_NONTERMINAL.match(s)
+```
+
+```python
+assert is_nonterminal("<abc>")
+assert is_nonterminal("<symbol-1>")
+assert not is_nonterminal("+")
+```
+
+## A Simple Grammar Fuzzer
+
+위 문법을 이제 사용해보자. start symbol(\<start\>)로 시작해서 계속해서 확장해나가는 간단한 문법 fuzzer를 만들 것이다. 무한한 입력으로의 확장을 피하기 위해, nonterminal의 수에 제한(max_nonterminals)을 둘 것이다. 더 나아가, symbol(이제 기호라고 부르겠다)의 수를 더이상 줄이지 못하는 상황에 처하는 것을 피하기 위해, expansion(마찬가지로 확장으로 명명한다) 단계의 총 개수를 제한한다.
+
+```python
+import random
+```
+
+```python
+class ExpansionError(Exception):
+    pass
+```
+
+```python
+def simple_grammar_fuzzer(grammar: Grammar, 
+                          start_symbol: str = START_SYMBOL,
+                          max_nonterminals: int = 10,
+                          max_expansion_trials: int = 100,
+                          log: bool = False) -> str:
+    """Produce a string from `grammar`.
+       `start_symbol`: use a start symbol other than `<start>` (default).
+       `max_nonterminals`: the maximum number of nonterminals 
+         still left for expansion
+       `max_expansion_trials`: maximum # of attempts to produce a string
+       `log`: print expansion progress if True"""
+
+    term = start_symbol
+    expansion_trials = 0
+
+    while len(nonterminals(term)) > 0:
+        symbol_to_expand = random.choice(nonterminals(term))
+        expansions = grammar[symbol_to_expand]
+        expansion = random.choice(expansions)
+        # In later chapters, we allow expansions to be tuples,
+        # with the expansion being the first element
+        if isinstance(expansion, tuple):
+            expansion = expansion[0]
+
+        new_term = term.replace(symbol_to_expand, expansion, 1)
+
+        if len(nonterminals(new_term)) < max_nonterminals:
+            term = new_term
+            if log:
+                print("%-40s" % (symbol_to_expand + " -> " + expansion), term)
+            expansion_trials = 0
+        else:
+            expansion_trials += 1
+            if expansion_trials >= max_expansion_trials:
+                raise ExpansionError("Cannot expand " + repr(term))
+
+    return term
+```
+
+이제 이 간단한 문법 fuzzer가 산술식을 start 기호부터 담아냈는지 보자.
+
+```python
+simple_grammar_fuzzer(grammar=EXPR_GRAMMAR, max_nonterminals=3, log=True)
+```
+
+> ```
+> <start> -> <expr>                        <expr>
+> <expr> -> <term> + <expr>                <term> + <expr>
+> <term> -> <factor>                       <factor> + <expr>
+> <factor> -> <integer>                    <integer> + <expr>
+> <integer> -> <digit>                     <digit> + <expr>
+> <digit> -> 6                             6 + <expr>
+> <expr> -> <term> - <expr>                6 + <term> - <expr>
+> <expr> -> <term>                         6 + <term> - <term>
+> <term> -> <factor>                       6 + <factor> - <term>
+> <factor> -> -<factor>                    6 + -<factor> - <term>
+> <term> -> <factor>                       6 + -<factor> - <factor>
+> <factor> -> (<expr>)                     6 + -(<expr>) - <factor>
+> <factor> -> (<expr>)                     6 + -(<expr>) - (<expr>)
+> <expr> -> <term>                         6 + -(<term>) - (<expr>)
+> <expr> -> <term>                         6 + -(<term>) - (<term>)
+> <term> -> <factor>                       6 + -(<factor>) - (<term>)
+> <factor> -> +<factor>                    6 + -(+<factor>) - (<term>)
+> <factor> -> +<factor>                    6 + -(++<factor>) - (<term>)
+> <term> -> <factor>                       6 + -(++<factor>) - (<factor>)
+> <factor> -> (<expr>)                     6 + -(++(<expr>)) - (<factor>)
+> <factor> -> <integer>                    6 + -(++(<expr>)) - (<integer>)
+> <expr> -> <term>                         6 + -(++(<term>)) - (<integer>)
+> <integer> -> <digit>                     6 + -(++(<term>)) - (<digit>)
+> <digit> -> 9                             6 + -(++(<term>)) - (9)
+> <term> -> <factor> * <term>              6 + -(++(<factor> * <term>)) - (9)
+> <term> -> <factor>                       6 + -(++(<factor> * <factor>)) - (9)
+> <factor> -> <integer>                    6 + -(++(<integer> * <factor>)) - (9)
+> <integer> -> <digit>                     6 + -(++(<digit> * <factor>)) - (9)
+> <digit> -> 2                             6 + -(++(2 * <factor>)) - (9)
+> <factor> -> +<factor>                    6 + -(++(2 * +<factor>)) - (9)
+> <factor> -> -<factor>                    6 + -(++(2 * +-<factor>)) - (9)
+> <factor> -> -<factor>                    6 + -(++(2 * +--<factor>)) - (9)
+> <factor> -> -<factor>                    6 + -(++(2 * +---<factor>)) - (9)
+> <factor> -> -<factor>                    6 + -(++(2 * +----<factor>)) - (9)
+> <factor> -> <integer>.<integer>          6 + -(++(2 * +----<integer>.<integer>)) - (9)
+> <integer> -> <digit>                     6 + -(++(2 * +----<digit>.<integer>)) - (9)
+> <integer> -> <digit>                     6 + -(++(2 * +----<digit>.<digit>)) - (9)
+> <digit> -> 1                             6 + -(++(2 * +----1.<digit>)) - (9)
+> <digit> -> 7                             6 + -(++(2 * +----1.7)) - (9)
+> '6 + -(++(2 * +----1.7)) - (9)'
+> ```
+
+nonterminal의 제한을 늘림으로써, 빠르게 더 긴 생산을 얻을 수 있다.
+
+```python
+for i in range(10):
+    print(simple_grammar_fuzzer(grammar=EXPR_GRAMMAR, max_nonterminals=5))
+```
+
+>```
+> 7 / +48.5
+> -5.9 / 9 - 4 * +-(-+++((1 + (+7 - (-1 * (++-+7.7 - -+-4.0))))) * +--4 - -(6) + 64)
+> 8.2 - 27 - -9 / +((+9 * --2 + --+-+-((-1 * +(8 - 5 - 6)) * (-((-+(((+(4))))) - ++4) / +(-+---((5.6 - --(3 * -1.8 * +(6 * +-(((-(-6) * ---+6)) / +--(+-+-7 * (-0 * (+(((((2)) + 8 - 3 - ++9.0 + ---(--+7 / (1 / +++6.37) + (1) / 482) / +++-+0)))) * -+5 + 7.513)))) - (+1 / ++((-84)))))))) * ++5 / +-(--2 - -++-9.0)))) / 5 * --++090
+> 1 - -3 * 7 - 28 / 9
+> (+9) * +-5 * ++-926.2 - (+9.03 / -+(-(-6) / 2 * +(-+--(8) / -(+1.0) - 5 + 4)) * 3.5)
+> 8 + -(9.6 - 3 - -+-4 * +77)
+> -(((((++((((+((++++-((+-37))))))))))))) / ++(-(+++(+6)) * -++-(+(++(---6 * (((7)) * (1) / (-7.6 * 535338) + +256) * 0) * 0))) - 4 + +1
+> 5.43
+> (9 / -405 / -23 - +-((+-(2 * (13))))) + +6 - +8 - 934
+> -++2 - (--+715769550) / 8 / (1)
+> ```
+
+이 fuzzer는 대부분의 경우 작동하지만 몇 가지 단점을 가지고 있다.
+
+사실, simple_grammar_fuzzer()는 많은 수의 탐색 및 대체 명령 때문에 비효율적이고, 심지어 문자열을 만들어내지 못할 수도 있다. 반면, 구현은 직관적이고 대부분의 경우에서 작동한다. 이 장에서, 우리는 이것에 집중한다; 다음 장에선, 우리는 더 효율적인 것을 만들어보이는 것을 보여줄 것이다.
+
+## Visualizing Grammars as Railroad Diagrams
+
