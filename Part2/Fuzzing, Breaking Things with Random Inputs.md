@@ -779,4 +779,334 @@ with ExpectError():
 
 ### Program-Specific Checkers
 
-특정 플랫폼 또는 특정 언어의 모든 프로그램에 적용되는 일반 검사기 외에도 프로그램 또는 하위 시스템에 적용되는 특정 검사기를 고안할 수 있다.
+특정 플랫폼 또는 특정 언어의 모든 프로그램에 적용되는 일반 검사기 외에도 프로그램 또는 하위 시스템에 적용되는 특정 검사기를 고안할 수 있다. [chapter on testing](/Part1/Introduction%20to%20Software%20Testing.md)에서, 런타임 때에 정확성을 위해 함수 결과를 검사하는 [runtime verification](/Part1/Introduction%20to%20Software%20Testing.md)의 기술에서 이미 힌트를 얻었다.
+
+에러를 감지하는 주요 아이디어 중 하나는 assertion의 개념이다. assertion은 중요한 함수의 입력(전제조건)과 결과(후조건)을 검사하는 속성이다. 프로그램 내에 더 많은 assertion을 가질수록, 일반적인 검사기에 의해 감지되지 않은 에러를 실행 도중에 감지할 확률이 커진다. - 특히 fuzzing 중에는, 만약 여러분이 assertion이 성능에 끼칠 영향이 걱정된다면, 생산 코드 내에선 assertion을 꺼둘 수 있다는 것을 기억하자(그럼에도 불구하고 대부분의 중요한 검사는 활성화해둔채로 놔두는 것이 도움이 될 것이다).
+
+에러를 찾기 위한 assertion의 가장 중요한 사용처 중 하나는 복잡한 데이터 구조의 무결성을 검사하는 것이다. 간단한 예제를 사용해서 이 개념을 살펴보자. 다음과 같이 공항 코드와 공항을 매핑한다고 가정해보자
+
+```python
+airport_codes: Dict[str, str] = {
+    "YVR": "Vancouver",
+    "JFK": "New York-JFK",
+    "CDG": "Paris-Charles de Gaulle",
+    "CAI": "Cairo",
+    "LED": "St. Petersburg",
+    "PEK": "Beijing",
+    "HND": "Tokyo-Haneda",
+    "AKL": "Auckland"
+}  # plus many more
+```
+
+```python
+airport_codes["YVR"]
+```
+
+> 'Vancouver'
+
+```python
+"AKL" in airport_codes
+```
+
+> True
+
+이 공항 코드의 리스트는 꽤나 중요할 수 있다: 만약 공항 코드 중 하나에서 철자를 잘못 쓴다면, 이는 우리가 가지고 있는 응용 프로그램에 영향을 미칠 수 있다. 따라서 우리는 일관성을 위해 리스트를 검사하는 함수를 소개한다. 일관성 조건은 representation invariant로 불리며, 이를 검사하는 함수(혹은 메소드)는 일반적으로 "the representation is ok"는 의미로 repOK()로 명명된다.
+
+먼저, 개별적인 공항 코드를 위한 검사기를 가져보자. 검사기는 코드가 일관적이지 않다면 실패한다.
+
+```python
+def code_repOK(code: str) -> bool:
+    assert len(code) == 3, "Airport code must have three characters: " + repr(code)
+    for c in code:
+        assert c.isalpha(), "Non-letter in airport code: " + repr(code)
+        assert c.isupper(), "Lowercase letter in airport code: " + repr(code)
+    return True
+```
+
+```python
+assert code_repOK("SEA")
+```
+
+이제 code_repOK()를 사용해 리스트 내의 모든 요소를 검사할 수 있다.
+
+```python
+def airport_codes_repOK():
+    for code in airport_codes:
+        assert code_repOK(code)
+    return True
+```
+
+```python
+with ExpectError():
+    assert airport_codes_repOK()
+```
+
+만약 우리가 리스트에 유효하지 않은 요소를 추가하면, 우리의 검사는 실패할 것이다:
+
+```python
+airport_codes["YMML"] = "Melbourne"
+```
+
+```python
+with ExpectError():
+    assert airport_codes_repOK()
+```
+
+> ```
+> Traceback (most recent call last):
+>   File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_72058/2308942452.py", line 2, in <cell line: 1>
+>     assert airport_codes_repOK()
+>   File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_72058/480627665.py", line 3, in airport_codes_repOK
+>     assert code_repOK(code)
+>   File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_72058/865020192.py", line 2, in code_repOK
+>     assert len(code) == 3, "Airport code must have three characters: " + repr(code)
+> AssertionError: Airport code must have three characters: 'YMML' (expected)
+
+물론, 리스트를 직접 조작하는 것보다, 요소를 추가하기 위한 특별한 함수를 가질 것이다; 이는 또한 코드가 유효한지 검사할 수 있을 것이다:
+
+```python
+def add_new_airport(code: str, city: str) -> None:
+    assert code_repOK(code)
+    airport_codes[code] = city
+```
+
+```python
+with ExpectError():  # For BER, ExpectTimeout would be more appropriate
+    add_new_airport("BER", "Berlin")
+```
+
+이는 인자 리스트 내의 오류를 찾아낼 수 있도록 한다:
+
+```python
+with ExpectError():
+    add_new_airport("London-Heathrow", "LHR")
+```
+
+> ```
+> Traceback (most recent call last):
+>   File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_72058/1427835309.py", line 2, in <cell line: 1>
+>     add_new_airport("London-Heathrow", "LHR")
+>   File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_72058/2655039924.py", line 2, in add_new_airport
+>     assert code_repOK(code)
+>   File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_72058/865020192.py", line 2, in code_repOK
+>     assert len(code) == 3, "Airport code must have three characters: " + repr(code)
+> AssertionError: Airport code must have three characters: 'London-Heathrow' (expected)
+
+그렇지만 최대한의 검사를 위해, add_new_airport() 함수는 공항 코드 리스트를 바꾸기 전과 바꾼 후에 정확한 표시를 보장해야 한다.
+
+```python
+def add_new_airport_2(code: str, city: str) -> None:
+    assert code_repOK(code)
+    assert airport_codes_repOK()
+    airport_codes[code] = city
+    assert airport_codes_repOK()
+```
+
+이는 미리 소개된 비일관성을 잡아낼 수 있다.
+
+```python
+with ExpectError():
+    add_new_airport_2("IST", "Istanbul Yeni Havalimanı")
+```
+
+> ```
+> Traceback (most recent call last):
+>   File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_72058/4151824846.py", line 2, in <cell line: 1>
+>     add_new_airport_2("IST", "Istanbul Yeni Havalimanı")
+>   File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_72058/2099116665.py", line 3, in add_new_airport_2
+>     assert airport_codes_repOK()
+>   File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_72058/480627665.py", line 3, in airport_codes_repOK
+>     assert code_repOK(code)
+>   File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_72058/865020192.py", line 2, in code_repOK
+>     assert len(code) == 3, "Airport code must have three characters: " + repr(code)
+> AssertionError: Airport code must have three characters: 'YMML' (expected)
+> ```
+
+더 많은 repOK() assertion이 코드 내에 있을수록, 잡아내는 에러는 더 많아진다 - 심지어 이들은 오직 여러분의 도메인과 문제에만 특화되어 있다. 또한 이러한 assertion은 프로그래밍 동안 여러분이 한 가정들을 문서화시키고 따라서 다른 개발자들이 당신의 코드를 이해하고 에러를 방지하는 것을 돕는다.
+
+마지막 예제로, 복잡한 데이터 구조인 [red-black tree](https://en.wikipedia.org/wiki/Red-black_tree)를 고려한다. red-black tree는 스스로 균형을 잡는 바이너리 탐색 트리이다. red-black tree를 구현하는 것은 너무 어렵지 않지만, 정확히 구현하는 것은 숙련된 개발자에게도 시간을 잡아먹는 작업일 수 있다. 하지만 repOK() 메소드는 모든 가정을 문서화하고 또한 그들을 검사한다:
+
+```python
+class RedBlackTree:
+    def repOK(self):
+        assert self.rootHasNoParent()
+        assert self.rootIsBlack()
+        assert self.rootNodesHaveOnlyBlackChildren()
+        assert self.treeIsAcyclic()
+        assert self.parentsAreConsistent()
+        return True
+
+    def rootIsBlack(self):
+        if self.parent is None:
+            assert self.color == BLACK
+        return True
+
+    def add_element(self, elem):
+        assert self.repOK()
+        ...  # Add the element
+        assert self.repOK()
+
+    def delete_element(self, elem):
+        assert self.repOK()
+        ...  # Delete the element
+        assert self.repOK()
+```
+
+여기서 repOK()는 RedBlackTree 클래스의 객체에서 실행되는 메서드이다. 이는 다섯 가지 서로다른 검사를 실행하며, 그들 모두는 자신 만의 assertion을 가진다. 요소가 추가되거나 삭제될 때마다, 이 모든 일관성 검사가 자동적으로 실행된다. 만약 이 검사들 중 하나라도 오류를 가진다면, 검사기는 그들을 찾아낼 것이다 - 물론 이는 여러분이 충분히 많은 fuzz된 입력을 통해 tree를 실행했을 때의 말이다.
+
+### Static Code Checkers
+
+repOK() assertion을 통해 얻을 수 있는 많은 이득들은 여러분 코드의 정적 유형 검사기를 통해서도 얻을 수 있다. 예를 들어 파이썬에선, MyPy 정적 검사기는 인자의 유형이 적절히 정의되자마자 유형 오류를 찾을 수 있다:
+
+```python
+typed_airport_codes: Dict[str, str] = {
+    "YVR": "Vancouver", # etc
+}
+```
+
+만약 다음처럼 문자열이 아닌 유형으로 key를 추가하면
+
+```python
+typed_airport_codes[1] = "First"
+```
+
+이는 MyPy에 의해 즉시 잡힐 것이다:
+
+```bash
+$ mypy airports.py
+airports.py: error: Invalid index type "int" for "Dict[str, str]"; expected type "str"
+```
+
+정확히 3개의 대문자로 이루어진 공항 코드 혹은 비순환적인 tree같은 더 고급 속성을 정적으로 검사하는 것은 정적 검사의 한계에 빠르게 도달할 것이다. 여러분의 repOK() assertions은 여전히 필요할 것이며 좋은 검사 생성기와 결합될 때 최고일 것이다.
+
+## A Fuzzing Architecture
+
+이 장에 일부 부분을 나중에 재사용하고 싶기 때문에, 재사용하기 쉽고, 특히 확장하기 쉬운 방향으로 일부 부분을 정의할 것이다. 이를 위해, 재사용 가능한 방향으로 위 기능을 캡슐화하는 여러 클래스들을 소개한다.
+
+### Runner Classes
+
+먼저 소개할 것은 Runner의 개념이다 - Runner는 주어진 입력에 따라 어떤 객체를 실행하는 것이 목적인 객체이다. runner는 보통 검사가 진행중인 프로그램 혹은 함수이지만, 우리는 더 간단한 runner를 가질 수도 있다.
+
+runner의 기본 클래스부터 시작하자. runner는 runner에게 input(문자열)을 건네주는데 사용되는 run(input) 메소드를 필수적으로 제공한다. run()은 (result, outcome)의 pair를 return한다. 여기서, result는 실행에 대한 세부사항을 주는 runner에 특화된 값이다; outcome은 3종류로 결과를 분류하는 값이다:
+
+- Runner.PASS - 검사가 통과됨. 실행은 정확한 결과를 생산함.
+- Runner.FAIL - 검사가 실패함. 실행은 정확하지 않은 결과를 생산함.
+- Runner.UNRESOLVED - 검사는 통과되지도 실패하지도 않음. 이는 만약 실행을 수행할 수 없었으면 발생함. 예를 들어, 입력이 유효하지 않았을 경우.
+
+```python
+Outcome = str
+```
+
+```python
+class Runner:
+    """Base class for testing inputs."""
+
+    # Test outcomes
+    PASS = "PASS"
+    FAIL = "FAIL"
+    UNRESOLVED = "UNRESOLVED"
+
+    def __init__(self) -> None:
+        """Initialize"""
+        pass
+
+    def run(self, inp: str) -> Any:
+        """Run the runner with the given input"""
+        return (inp, Runner.UNRESOLVED)
+```
+
+기본 클래스로서 Runner는 이를 기반으로 구축되는 보다 복잡한 runner를 위한 인터페이스를 제공할 뿐이다. 더 자세히는, 추가적인 메소드를 추가하거나 상속된 메소드를 오버라이드하기 위해 그들의 부모클래스로부터 메소드를 상속받는 자식클래스를 소개한다.
+
+이러한 자식클래스의 한 예시를 보자: PrintRunner는 상속받은 run() 메소드를 오버라이드하여 받은 모든 것들을 단순히 출력한다. 이는 많은 상황에서 기본 runner이다.
+
+```python
+class PrintRunner(Runner):
+    """Simple runner, printing the input."""
+
+    def run(self, inp) -> Any:
+        """Print the given input"""
+        print(inp)
+        return (inp, Runner.UNRESOLVED)
+```
+
+```python
+p = PrintRunner()
+(result, outcome) = p.run("Some input")
+```
+
+> Some input
+
+결과는 우리가 입력으로 넘겨주었던 문자열이다.
+
+```python
+result
+```
+
+> 'Some input'
+
+그러나 이 시점에선, 프로그램의 동작을 구별할 수 있는 방법은 없다:
+
+```python
+outcome
+```
+
+> 'UNRESOLVED'
+
+ProgramRunner 클래스는 프로그램의 입력을 프로그램의 표준 입력으로 대신 보낸다. 프로그램은 ProgramRunner 객체를 생성할 때 지정된다.
+
+```python
+class ProgramRunner(Runner):
+    """Test a program with inputs."""
+
+    def __init__(self, program: Union[str, List[str]]) -> None:
+        """Initialize.
+           `program` is a program spec as passed to `subprocess.run()`"""
+        self.program = program
+
+    def run_process(self, inp: str = "") -> subprocess.CompletedProcess:
+        """Run the program with `inp` as input.
+           Return result of `subprocess.run()`."""
+        return subprocess.run(self.program,
+                              input=inp,
+                              stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE,
+                              universal_newlines=True)
+
+    def run(self, inp: str = "") -> Tuple[subprocess.CompletedProcess, Outcome]:
+        """Run the program with `inp` as input.  
+           Return test outcome based on result of `subprocess.run()`."""
+        result = self.run_process(inp)
+
+        if result.returncode == 0:
+            outcome = self.PASS
+        elif result.returncode < 0:
+            outcome = self.FAIL
+        else:
+            outcome = self.UNRESOLVED
+
+        return (result, outcome)
+```
+
+여기에 바이너리(즉, 텍스트가 아닌) 입력 및 출력을 위한 변형이 있다.
+
+```python
+class BinaryProgramRunner(ProgramRunner):
+    def run_process(self, inp: str = "") -> subprocess.CompletedProcess:
+        """Run the program with `inp` as input.  
+           Return result of `subprocess.run()`."""
+        return subprocess.run(self.program,
+                              input=inp.encode(),
+                              stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE)
+```
+
+cat 프로그램을 통해 ProgramRunner를 시연해보자 - cat 프로그램은 입력을 출력에 복사한다. 우리는 cat의 표준 호출이 단순히 작업을 수행하고, cat의 출력은 입력과 동일함을 알 수 있다.
+
+```python
+cat = ProgramRunner(program="cat")
+cat.run("hello")
+```
+
+> (CompletedProcess(args='cat', returncode=0, stdout='hello', stderr=''), 'PASS')
+
+### Fuzzer Classes
