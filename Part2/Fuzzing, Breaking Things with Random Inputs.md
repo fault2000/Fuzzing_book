@@ -87,11 +87,11 @@ https://youtu.be/YjO1pIx7wS4
 > 
 > ![image](https://github.com/fault2000/Fuzzing_book/assets/73513005/11273346-2b7c-42f5-b6a3-a74a3e0506ce)
 
-# A Testing Assignment
+## A Testing Assignment
 
 대충 역사이므로 생략
 
-# A Simple Fuzzer
+## A Simple Fuzzer
 
 위 과제를 해결하고 fuzz 생성기를 만들어 보자. 아이디어는 무작위 문자를 생산하고, 버퍼 문자열 변수(out)에 그들을 넣은 뒤, 마지막으로 문자열을 return한다.
 
@@ -493,7 +493,7 @@ with ExpectTimeout(2):
 
 위 코드의 with ExpectTimeout() 줄은 근접한 코드의 실행이 2초 후에 에러 메세지를 출력하며 interrupt됨을 보장한다.
 
-## Rogue Numbers
+### Rogue Numbers
 
 fuzzing과 함께라면 모든 종류의 흥미로운 행동을 일으키는 **흔하지 않은 값**을 입력으로 생성하는 것은 쉽다. 다음 C 언어 코드를 보자, 이것은 먼저 입력으로부터 버퍼 크기를 읽고, 주어진 크기의 버퍼를 할당한다.
 
@@ -525,3 +525,258 @@ print(long_number)
 
 > 7056414967099541967374507745748918952640135045
 
+만약 이러한 숫자들을 collapse_if_too_large()에게 주면, 이 함수는 매우 빠르게 실패할 것이다.
+
+```python
+with ExpectError():
+    collapse_if_too_large(long_number)
+```
+
+> ```bash
+> Traceback (most recent call last):
+> File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_72058/2775103647.py", line 2, in <cell line: 1>
+>   collapse_if_too_large(long_number)
+> File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_72058/1591744602.py", line 3, in collapse_if_too_large
+>   raise ValueError
+> ValueError (expected)
+> ```
+
+만약 우리가 이 정도의 메모리를 시스템에 할당하고 싶다면, 위처럼 빠르게 실패하는 것은 차라리 좋은 옵션일 수도 있다. 현실에선, 메모리 부족은 시스템을 극적으로 느리게 만들어 거의 반응을 못하는 수준까지 도달할 것이다 - 그리고 재시작만이 유일한 옵션일 것이다.
+
+이것들은 모두 나쁜 프로그래밍 혹은 나쁜 프로그래밍 언어로 인한 문제라고 주장할 수 있다. 그렇지만 매일 1000여 명의 사람들이 프로그램을 매일 시작하고 있고, 그들 모두가 반복해서 같은 실수를 하고 있다.
+
+## Catching Errors
+
+Miller와 그의 학생들이 첫 fuzzer를 만들었을 때, 그들은 프로그램이 crash 혹은 hang되었기에 에러를 단순히 식별할 수 있었다. - 이 두 상태는 쉽게 인식할 수 있다. 그렇지만 만약 실패가 더 사소하다면, 우리는 추가적인 검사를 찾아내야 한다.
+
+### Generic Checkers
+
+[위에서 논의된](#buffer-overflows) 버퍼 오버플로우는 보다 일반적인 문제의 특별한 예이다: C와 C++같은 언어들에서, 프로그램은 메모리 내의 임의의 부분에 접근할 수 있다 - 이러한 임의의 부분은 초기화되어 있지 않거나, 이미 free되었거나 단순히 접근하려고 시도하는 데이터 구조의 부분이 아닐 수도 있다. 이는 여러분이 운영 체제를 쓰기를 원한다면 필수적이며, 최대의 성능 혹은 제어를 원한다면 좋지만, 여러분이 실수를 피하고 싶다면 꽤나 나쁠 것이다. 운 좋게도, 여기엔 런타임에서 이러한 문제를 잡아내는데 도움이 되는 도구들이 있고, 그들은 fuzzing과 조합했을 때 아주 좋다.
+
+#### Checking Memory Accesses
+
+검사 진행 도중 문제가 될 수 있는 메모리 접근을 감지하기 위해, C 프로그램을 특별한 memory-checking 환경에서 실행할 수 있다; 런타임 동안, 이 환경은 각각의 모든 메모리 명령들이 유효한, 초기화된 메모리에 접근하는지 검사한다. 유명한 예시로는 [LLVM Address Sanitizer](https://clang.llvm.org/docs/AddressSanitizer.html)가 있으며 이는 잠재적으로 위험한 메모리 안전 위반의 전체 집합을 감지한다. 다음 예제에서는 이 도구로 다소 간편한 C 프로그램을 컴파일하고 메모리의 할당된 부분 뒤를 읽음으로써 out-of-bounds 읽기를 유발한다.
+
+```python
+with open("program.c", "w") as f:
+    f.write("""
+#include <stdlib.h>
+#include <string.h>
+
+int main(int argc, char** argv) {
+    /* Create an array with 100 bytes, initialized with 42 */
+    char *buf = malloc(100);
+    memset(buf, 42, 100);
+
+    /* Read the N-th element, with N being the first command-line argument */
+    int index = atoi(argv[1]);
+    char val = buf[index];
+
+    /* Clean up memory so we don't leak */
+    free(buf);
+    return val;
+}
+    """)
+```
+
+```python
+from bookutils import print_file
+```
+
+```python
+print_file("program.c")
+```
+
+```c
+#include <stdlib.h>
+#include <string.h>
+
+int main(int argc, char** argv) {
+    /* Create an array with 100 bytes, initialized with 42 */
+    char *buf = malloc(100);
+    memset(buf, 42, 100);
+
+    /* Read the N-th element, with N being the first command-line argument */
+    int index = atoi(argv[1]);
+    char val = buf[index];
+
+    /* Clean up memory so we don't leak */
+    free(buf);
+    return val;
+}
+```
+
+이 C 프로그램을 address sanitization을 활성화한 상태로 컴파일한다.
+
+```bash
+!clang -fsanitize=address -g -o program program.c
+```
+
+만약 인자 99를 가지고 프로그램을 실행하면, buf[99]가 리턴되고 이 값은 42이다.
+
+```bash
+!./program 99; echo $?
+```
+
+하지만, buf[110]에 접근하는 것은 AddressSanitizer에서 out-of-bounds 의 결과를 낸다.
+
+```bash
+!./program 110
+```
+
+> ```bash
+> =================================================================
+> ==72172==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x000104202a9e at pc 0x0001041abe84 bp 0x00016bc56680 sp 0x00016bc56678
+> READ of size 1 at 0x000104202a9e thread T0
+>     #0 0x1041abe80 in main program.c:12
+>     #1 0x181c310dc  (<unknown module>)
+> 
+> 0x000104202a9e is located 10 bytes after 100-byte region [0x000104202a30,0x000104202a94)
+> allocated by thread T0 here:
+>     #0 0x104a57244 in wrap_malloc+0x94 (libclang_rt.asan_osx_dynamic.dylib:arm64e+0x53244)
+>     #1 0x1041abdc8 in main program.c:7
+>     #2 0x181c310dc  (<unknown module>)
+> 
+> SUMMARY: AddressSanitizer: heap-buffer-overflow program.c:12 in main
+> Shadow bytes around the buggy address:
+>   0x000104202800: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+>   0x000104202880: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+>   0x000104202900: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+>   0x000104202980: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+>   0x000104202a00: fa fa fa fa fa fa 00 00 00 00 00 00 00 00 00 00
+> =>0x000104202a80: 00 00 04[fa]fa fa fa fa fa fa fa fa fa fa fa fa
+>   0x000104202b00: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+>   0x000104202b80: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+>   0x000104202c00: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+>   0x000104202c80: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+>   0x000104202d00: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+> Shadow byte legend (one shadow byte represents 8 application bytes):
+>   Addressable:           00
+>   Partially addressable: 01 02 03 04 05 06 07 
+>   Heap left redzone:       fa
+>   Freed heap region:       fd
+>   Stack left redzone:      f1
+>   Stack mid redzone:       f2
+>   Stack right redzone:     f3
+>   Stack after return:      f5
+>   Stack use after scope:   f8
+>   Global redzone:          f9
+>   Global init order:       f6
+>   Poisoned by user:        f7
+>   Container overflow:      fc
+>   Array cookie:            ac
+>   Intra object redzone:    bb
+>   ASan internal:           fe
+>   Left alloca redzone:     ca
+>   Right alloca redzone:    cb
+> ==72172==ABORTING
+> ```
+
+C 프로그램에서 에러를 찾기를 원한다면, 퍼징을 위해 이러한 검사를 켜놓는 것은 꽤나 쉽다. 도구에 따른 특정 요인이 실행의 속도를 늦추고(AddressSanitizer의 경우 보통 2배), 또한 더 많은 메모리를 소비하지만, 이러한 버그를 찾기 위해 들어가는 인간의 노력에 비교하면 CPU 사이클은 매우 싸다.
+
+공격자들을 위한 것이 아닌 메모리에 접근하거나 심지어 정보를 수정하게 할 수 있기 때문에 메모리에 대한 Out-of-bounds 접근은 대단한 보안적 위협이다. 유명한 예제로, [HeartBleed bug](https://en.wikipedia.org/wiki/Heartbleed)는 OpenSSL 라이브러리 내의 보안 버그로, OpenSSL 라이브러리는 컴퓨터 네트워크를 통해 통신 보안을 제공하는 암호화 프로토콜을 구현한다(만약 여러분이 브라우저에서 이 텍스트를 읽는 경우 이러한 프로토콜을 사용하여 암호화되었을 가능성이 높다).
+
+HeartBleed 버그는 SSL heartbeat 서비스에 특별히 제작되 명령을 전송함으로써 악용된다. heartbeat 서비스는 다른 한쪽의 서버가 여전히 살아있는지 검사하는데에 사용된다. client는 다음과 같은 문자열을 서비스에 전송한다
+
+> BIRD(4 letters)
+
+어떤 서버가 BIRD에 대해 답하는지 확인하고, client는 서버가 살아있는지 알게 된다.
+
+운 나쁘게도, 이 서비스는 요청된 문자들의 집합보다 더 많이 답하도록 서버에 요청함으로써 악용될 수 있다. 이는 다음 [XKCD comic](https://xkcd.com/1354/)에서 매우 잘 설명되어 있다.
+
+![image](https://github.com/fault2000/Fuzzing_book/assets/73513005/975cda89-489a-47ef-8a2b-bc1cffcd0f2c)
+
+OpenSSL 구현에서, 이러한 메모리 내용은 암호화 인증서, 개인 키, 그리고 더한 것들이 포함되어 있을 수 있으며 - 최악인 점은, 이 메모리가 방금 접근되어졌음을 아무도 알아차리지 못한다는 것이다. HeartBleed 버그가 발견되었을 때, 이 버그는 오랫동안 존재해왔으며, 아무도 어떤 비밀이 새어나갔는지, 새어나가긴 했는지 알지 못했다; 빠르게 설정된 [HeartBleed announcement page](http://heartbleed.com/)가 모든 것을 말해준다.
+
+하지만 어떻게 HeartBleed가 발견되었을까? 매우 간단하다. codenomicon과 구글의 연구원들은 OpenSSL 라이브러리를 address Sanitizer로 컴파일한 다음 fuzz된 명령어로 실행했다. 그 다음 memory sanitizer는 out-of-bound 메모리 접근이 발생되었음을 알아차렸다 - 그리고 실제로, 그것은 버그를 매우 빠르게 발견했다.
+
+메모리 검사기는 fuzzing동안 런타임 오류를 감지하기 위해 실행하는 수많은 검사기 중 하나일 뿐이다. [chapter on mining function](/part4/Mining%20Function%20Specifications.md)에서, 일반 검사기를 정의하는 법에 대해 더 배울 것이다.
+
+program에 볼 일은 끝났으므로, 치워놓자.
+
+```bash
+!rm -fr program program.*
+```
+
+#### Information Leaks
+
+정보 유출은 불법적인 메모리 접근을 통해서만 일어나진 않는다; 그들은 "유효한" 메모리 내부에서 일어날 수도 있다 - 만약 이 "유효한" 메모리가 유출되지 않아야 하는 중요한 정보들을 포함하고 있다면 말이다. 파이썬 프로그램에서 이 문제를 표현해보자. 시작하기 위해, 실제 데이터와 무작위 데이터로 채워진 프로그램 메모리를 생성해보자.
+
+```python
+secrets = ("<space for reply>" + fuzzer(100) +
+           "<secret-certificate>" + fuzzer(100) +
+           "<secret-key>" + fuzzer(100) + "<other-secrets>")
+```
+
+더 많은 "메모리" 문자들을 secrets에 추가한다. 이 문자들은 초기화되지 않은 메모리에 대한 표시로 "deadbeef"로 채워진다:
+
+```python
+uninitialized_memory_marker = "deadbeef"
+while len(secrets) < 2048:
+    secrets += uninitialized_memory_marker
+```
+
+되돌려 받을 답장과 답장의 길이를 작성하는 (위에서 논의한 heartbeat 서비스와 비슷한)서비스를 정의한다. 이 서비스는 메모리 내에 보낼 답장을 저장하고, 주어진 길이에 따라 답장을 되돌려 보내준다.
+
+```python
+def heartbeat(reply: str, length: int, memory: str) -> str:
+    # Store reply in memory
+    memory = reply + memory[len(reply):]
+
+    # Send back heartbeat
+    s = ""
+    for i in range(length):
+        s += memory[i]
+    return s
+```
+
+이는 평범한 문자열에 완벽히 작동한다:
+
+```python
+heartbeat("potato", 6, memory=secrets)
+```
+
+> 'potato'
+
+```python
+heartbeat("bird", 4, memory=secrets)
+```
+
+> 'bird'
+
+하지만, 만약 답장의 길이가 답장할 문자열의 길이보다 크다면, 메모리의 추가적인 내용이 유출될 것이다. 이러한 모든 것들이 기존 배열 범위 내에서 여전히 일어나서 address sanitizer가 촉발되지 않음을 기억해두자:
+
+```python
+heartbeat("hat", 500, memory=secrets)
+```
+
+> 'hatace for reply>#,,!3?30>#61)\$4--8=<7)4 )03/%,5+! "4)0?.9+?3();\<42?=?0\<secret-certificate\>7(+/+((1)#/0\\'4!\>/\<#=78%6\$!!\$<-"3"\\'-?1?85!05629%/); *)1\\'/=9%\<secret-key\>.(#.4%\<other-secrets\>deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadb'
+
+이러한 문제는 어떻게 감지할까? 아이디어는 주어진 비밀이나 초기화되지 않은 메모리 같은 유출되어선 안 되는 정보를 식별화는 것이다. 작은 파이썬 예제에서 이러한 검사를 시뮬레이션해볼 수 있다.
+
+```python
+from ExpectError import ExpectError
+```
+
+```
+with ExpectError():
+    for i in range(10):
+        s = heartbeat(fuzzer(), random.randint(1, 500), memory=secrets)
+        assert not s.find(uninitialized_memory_marker)
+        assert not s.find("secret")
+```
+
+> ```bash
+> Traceback (most recent call last):
+>   File "/var/folders/n2/xd9445p97rb3xh7m1dfx8_4h0006ts/T/ipykernel_72058/4040656327.py", line 4, in <cell line: 1>
+>     assert not s.find(uninitialized_memory_marker)
+> AssertionError (expected)
+> ```
+
+이러한 검사를 통해, 유출된 비밀 그리고/혹은 초기화되지 않은 메모리를 찾을 수 있다. [chapter on information flow](/Part4/Tracking%20Information%20Flow.md)에서 이를 자동으로 수행하는 방법과 민감한 정보와 그로부터 파생된 값을 "tainting"하고 "tainted" 값이 새어나가지 않도록 하는 방법에 대해 논의한다.
+
+가장 중요한 것은, 언제나 fuzzing 동안 가능한 한 많은 자동 검사기를 활성화시켜야 한다. CPU cycle은 싸고 에러는 비싸다. 만약 실제로 에러를 감지하는 것 없이 오직 프로그램을 실행만 시킨다면, 여러분은 여러 기회들을 놓칠 것이다.
+
+### Program-Specific Checkers
+
+특정 플랫폼 또는 특정 언어의 모든 프로그램에 적용되는 일반 검사기 외에도 프로그램 또는 하위 시스템에 적용되는 특정 검사기를 고안할 수 있다.
