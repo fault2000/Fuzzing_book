@@ -1110,3 +1110,148 @@ cat.run("hello")
 > (CompletedProcess(args='cat', returncode=0, stdout='hello', stderr=''), 'PASS')
 
 ### Fuzzer Classes
+
+소비자에게 데이터를 제공하는 fuzzer를 정의해보자. fuzzer를 위한 기본 클래스는 입력을 생성하는 중심 메소드 중 하나인 fuzz()를 제공한다. run() 함수는 runner에게 fuzz() 입력을 runner에게 전송하여 결과를 return한다; run()은 주어진 횟수(trials)동안 이 작업을 수행한다.
+
+```python
+class Fuzzer:
+    """Base class for fuzzers."""
+
+    def __init__(self) -> None:
+        """Constructor"""
+        pass
+
+    def fuzz(self) -> str:
+        """Return fuzz input"""
+        return ""
+
+    def run(self, runner: Runner = Runner()) \
+            -> Tuple[subprocess.CompletedProcess, Outcome]:
+        """Run `runner` with fuzz input"""
+        return runner.run(self.fuzz())
+
+    def runs(self, runner: Runner = PrintRunner(), trials: int = 10) \
+            -> List[Tuple[subprocess.CompletedProcess, Outcome]]:
+        """Run `runner` with fuzz input, `trials` times"""
+        return [self.run(runner) for i in range(trials)]
+```
+
+기본적으로, 그들의 fuzz() 함수가 단지 추상적 placeholder이기에 Fuzzer 객체는 많은 일을 하지 않는다. 하지만 자식클래스 RandomFuzzer는 fuzzer() 함수의 기능을 구현하여 최소 길이를 지정하는 매개 변수 min_length를 추가한다.
+
+```python
+class RandomFuzzer(Fuzzer):
+    """Produce random inputs."""
+
+    def __init__(self, min_length: int = 10, max_length: int = 100,
+                 char_start: int = 32, char_range: int = 32) -> None:
+        """Produce strings of `min_length` to `max_length` characters
+           in the range [`char_start`, `char_start` + `char_range`)"""
+        self.min_length = min_length
+        self.max_length = max_length
+        self.char_start = char_start
+        self.char_range = char_range
+
+    def fuzz(self) -> str:
+        string_length = random.randrange(self.min_length, self.max_length + 1)
+        out = ""
+        for i in range(0, string_length):
+            out += chr(random.randrange(self.char_start,
+                                        self.char_start + self.char_range))
+        return out
+```
+
+RandomFuzzer로 fuzzer를 생성할 때 딱 한 번만 설정을 지정하면 되는 fuzzer를 생성할 수 있다.
+
+```python
+random_fuzzer = RandomFuzzer(min_length=20, max_length=20)
+for i in range(10):
+    print(random_fuzzer.fuzz())
+```
+
+> ```
+> '>23>33)(&"09.377.*3
+> *+:5 ? (?1$4<>!?3>.'
+> 4+3/(3 (0%!>!(+9%,#$
+> /51$2964>;)2417<9"2&
+> 907.. !7:&--"=$7',7*
+> (5=5'.!*+&>")6%9)=,/
+> ?:&5) ";.0!=6>3+>)=,
+> 6&,?:!#2))- ?:)=63'-
+> ,)9#839%)?&(0<6("*;)
+> 4?!(49+8=-'&499%?< '
+> ```
+
+이제 이러한 생성된 입력을 이전에 정의된 cat runner에 보내서 cat이 실제로 fuzz된 입력을 출력으로 복사함을 검증할 수 있다.
+
+```python
+for i in range(10):
+    inp = random_fuzzer.fuzz()
+    result, outcome = cat.run(inp)
+    assert result.stdout == inp
+    assert outcome == Runner.PASS
+```
+
+하지만, Fuzzer와 Runner를 합치는 것은 매우 일반적이어서 Fuzzer 클래스에서 제공하는 run() 메소드를 이 목적으로 사용할 수 있다.
+
+```python
+random_fuzzer.run(cat)
+```
+
+> ```
+> (CompletedProcess(args='cat', returncode=0, stdout='?:+= % <1<6$:(>=:9)5', stderr=''),
+> 'PASS')
+> ```
+
+runs()로 여러번 fuzzing 실행을 반복하여 결과의 리스트를 얻을 수 있다.
+
+```python
+random_fuzzer.runs(cat, 10)
+```
+
+> ```
+> [(CompletedProcess(args='cat', returncode=0, stdout='3976%%&+%6=(1)3&3:<9', stderr=''),
+>   'PASS'),
+>  (CompletedProcess(args='cat', returncode=0, stdout='33$#42$ 11=*%$20=<.-', stderr=''),
+>   'PASS'),
+>  (CompletedProcess(args='cat', returncode=0, stdout='"?<\'#8 </:*%9.--\'97!', stderr=''),
+>   'PASS'),
+>  (CompletedProcess(args='cat', returncode=0, stdout="/0-#(03/!#60'+6>&&72", stderr=''),
+>   'PASS'),
+>  (CompletedProcess(args='cat', returncode=0, stdout="=,+:,6'5:950+><3(*()", stderr=''),
+>   'PASS'),
+>  (CompletedProcess(args='cat', returncode=0, stdout=" 379+0?'%3137=2:4605", stderr=''),
+>   'PASS'),
+>  (CompletedProcess(args='cat', returncode=0, stdout="02>!$</'*81.#</22>+:", stderr=''),
+>   'PASS'),
+>  (CompletedProcess(args='cat', returncode=0, stdout="=-<'3-#88*%&*9< +1&&", stderr=''),
+>   'PASS'),
+>  (CompletedProcess(args='cat', returncode=0, stdout='2;;0=3&6=8&30&<-;?*;', stderr=''),
+>   'PASS'),
+>  (CompletedProcess(args='cat', returncode=0, stdout='/#05=*3($>::#7!0=12+', stderr=''),
+>   'PASS')]
+> ```
+
+이로써 fuzzer를 생성하기 위한 모든 준비가 끝났다 - 이 장에서 소개한 간단한 무작위 fuzzer부터 시작해 더 진화한 것까지 나아갈 수 있다. 
+
+## Lessons Learned
+
+- 무작위로 생성된 입력("fuzzing")은 빠르게 임의의 프로그램의 견고성을 검사하는 간단하고, 싼 방법이다.
+- fuzzer가 발견하는 버그는 주로 입력 처리의 오류와 결함으로 인한 것이다.
+- 오류를 잡아내기 위해, 가능한 한 많은 일관성 검사기(consistency checker)를 가져야 한다.
+
+여기서 볼 일은 끝났으므로 정리를 잊지 말자:
+
+```bash
+os.remove(FILE)
+os.removedirs(tempdir)
+```
+
+## Next Steps
+
+여기서부터, 여러분은 다음으로 넘어갈 수 있다.
+
+- [더 많은 유효한 입력을 얻기 위해 현존하는 입력에 변형을 사용](/Part2/Mutation-Based%20Fuzzing.md)
+- [입력 형식을 식별하기 위해 문법을 사용하고 이에 따라 더 많은 유효한 입력 얻기](/Part3/Fuzzing%20with%20Grammars.md)
+- [효율적인 디버깅을 위해 실패하는 입력 줄이기](/Part3/Reducing%20Failure-Inducing%20Input.md)
+
+즐독!
