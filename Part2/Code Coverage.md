@@ -293,3 +293,371 @@ cgi_decode("a+b")
 - event 매개변수는 "줄"(새 줄에 도달함) 또는 "call"(함수가 호출됨)을 포함한 값을 가진 문자열이다.
 - arg 매개변수는 몇몇 이벤트에 대한 추가적인 인자로, 예를 들어 "return" 이벤트의 경우 arg는 return된 값을 가진다.
 
+현재 실행되는 줄을 간단히 보고하기 위해 frame 인자를 통해 접근하는 추적 함수를 사용한다.
+
+```python
+from types import FrameType, TracebackType
+```
+
+```python
+coverage = []
+```
+
+```python
+def traceit(frame: FrameType, event: str, arg: Any) -> Optional[Callable]:
+    """Trace program execution. To be passed to sys.settrace()."""
+    if event == 'line':
+        global coverage
+        function_name = frame.f_code.co_name
+        lineno = frame.f_lineno
+        coverage.append(lineno)
+
+    return traceit
+```
+
+sys.settrace()를 통해 추적을 키거나 끌 수 있다:
+
+```python
+import sys
+```
+
+```python
+def cgi_decode_traced(s: str) -> None:
+    global coverage
+    coverage = []
+    sys.settrace(traceit)  # Turn on
+    cgi_decode(s)
+    sys.settrace(None)    # Turn off
+```
+
+cgi_decode("a+b")를 계산할 때, cgi_decode()를 통해 실행 경로를 볼 수 있다. hex_values, t, i의 초기화 후 while 루프가 3번 반복되었음을 볼 수 있다 - 하나마다 입력의 모든 문자임을 알 수 있다.
+
+```python
+cgi_decode_traced("a+b")
+print(coverage)
+```
+
+> [8, 9, 8, 9, 8, 9, 8, 9, 8, 9, 8, 10, 8, 10, 8, 10, 8, 10, 8, 10, 8, 11, 8, 11, 8, 11, 8, 11, 8, 11, 8, 11, 8, 12, 8, 12, 8, 15, 16, 17, 18, 19, 21, 30, 31, 17, 18, 19, 20, 31, 17, 18, 19, 21, 30, 31, 17, 32]
+
+실제로 이게 어떤 줄일까? 이를 위해, cgi_decode_code의 소스 코드를 얻어 cgi_decode_line의 배열로 인코딩한 뒤 이 배열에 커버리지 정보로 주석을 달 것이다. 먼저, cgi_encode의 소스 코드를 얻어보자:
+
+```python
+import inspect
+```
+
+```python
+cgi_decode_code = inspect.getsource(cgi_decode)
+```
+
+cgi_decode_code는 소스 코드를 가지고 있는 문자열이다. 이를 파이썬 구문 강조로 출력할 수 있다:
+
+```python
+from bookutils import print_content, print_file
+```
+
+```python
+print_content(cgi_decode_code[:300] + "...", ".py")
+```
+
+> ```python
+> def cgi_decode(s: str) -> str:
+>     """Decode the CGI-encoded string `s`:
+>        * replace '+' by ' '
+>        * replace "%xx" by the character with hex number xx.
+>        Return the decoded string.  Raise `ValueError` for invalid inputs."""
+> 
+>     # Mapping of hex digits to their integer values
+>     hex_v...
+> ```
+
+splitlines()를 사용해, 줄 번호로 index된 줄의 배열로 코드를 나눌 수 있다.
+
+```python
+cgi_decode_lines = [""] + cgi_decode_code.splitlines()
+```
+
+cgi_decode_lines[L]은 소스코드의 L 번째 줄이다.
+
+```python
+cgi_decode_lines[1]
+```
+
+> 'def cgi_decode(s: str) -> str:'
+
+실행된 첫 번째 줄(9)은 실제로 hex_values의 시작이고...
+
+```python
+cgi_decode_lines[9:13]
+```
+
+> ["        '0': 0, '1': 1, '2': 2, '3': 3, '4': 4,",
+>  "        '5': 5, '6': 6, '7': 7, '8': 8, '9': 9,",
+>  "        'a': 10, 'b': 11, 'c': 12, 'd': 13, 'e': 14, 'f': 15,",
+>  "        'A': 10, 'B': 11, 'C': 12, 'D': 13, 'E': 14, 'F': 15,"]
+
+...t의 초기화로 이어진다:
+
+```python
+cgi_decode_lines[15]
+```
+
+> '    t = ""'
+
+실제로 어떤 줄이 적어도 한 번 커버되었는지 보기 위해, coverage를 집합으로 변환할 수 있다:
+
+```python
+covered_lines = set(coverage)
+print(covered_lines)
+```
+
+> {32, 8, 9, 10, 11, 12, 15, 16, 17, 18, 19, 20, 21, 30, 31}
+
+커버되지 않은 줄을 #으로 주석을 단 상태로 전체 코드를 출력해보자. 이러한 주석의 아이디어는 커버되지 않은 줄에 직접 개발자의 관심을 집중시키기 위함이다.
+
+```python
+for lineno in range(1, len(cgi_decode_lines)):
+    if lineno not in covered_lines:
+        print("# ", end="")
+    else:
+        print("  ", end="")
+    print("%2d  " % lineno, end="")
+    print_content(cgi_decode_lines[lineno], '.py')
+    print()
+```
+
+> ```python
+> #  1  def cgi_decode(s: str) -> str:
+> #  2      """Decode the CGI-encoded string `s`:
+> #  3         * replace '+' by ' '
+> #  4         * replace "%xx" by the character with hex number xx.
+> #  5         Return the decoded string.  Raise `ValueError` for invalid inputs."""
+> #  6  
+> #  7      # Mapping of hex digits to their integer values
+>    8      hex_values = {
+>    9          '0': 0, '1': 1, '2': 2, '3': 3, '4': 4,
+>   10          '5': 5, '6': 6, '7': 7, '8': 8, '9': 9,
+>   11          'a': 10, 'b': 11, 'c': 12, 'd': 13, 'e': 14, 'f': 15,
+>   12          'A': 10, 'B': 11, 'C': 12, 'D': 13, 'E': 14, 'F': 15,
+> # 13      }
+> # 14  
+>   15      t = ""
+>   16      i = 0
+>   17      while i < len(s):
+>   18          c = s[i]
+>   19          if c == '+':
+>   20              t += ' '
+>   21          elif c == '%':
+> # 22              digit_high, digit_low = s[i + 1], s[i + 2]
+> # 23              i += 2
+> # 24              if digit_high in hex_values and digit_low in hex_values:
+> # 25                  v = hex_values[digit_high] * 16 + hex_values[digit_low]
+> # 26                  t += chr(v)
+> # 27              else:
+> # 28                  raise ValueError("Invalid encoding")
+> # 29          else:
+>   30              t += c
+>   31          i += 1
+>   32      return t
+> ```
+
+여러 (#으로 표시된)실행되지 않은 (눈에 띄는 주석)줄을 볼 수 있으며 이들은 단순히 실행되지 않았기에 표시된다. 하지만, elif c == '%'아래의 줄이 아직 실행되었지 않았음을 볼 수 있다. 만약 "a+b"가 지금까지 우리의 유일한 테스트 케이스였다면, 이 놓친 커버리지는 실제로 이 #으로 표시된 줄을 커버하는 또다른 테스트 케이스를 생성하도록 격려한다.
+
+## A Coverage Class
+
+이 책에서, 서로다른 테스트 생성 기술의 유효성을 측정하고 테스트 생성을 코드 커버리지로 안내하기 위해 커버리지를 계속해서 활용한다. 전역 coverage 변수의 우리의 이전 구현은 이 때문에 조금 거슬린다. 따라서 커버리지를 쉽게 측정할 수 있도록 우리를 도울 여러 기능을 구현한다.
+
+커버리지를 얻는 주요 아이디어는 Python with 문을 사용하는 것이다. 기본적인 형태는
+
+```python
+with OBJECT [as VARIABLE]:
+    BODY
+```
+
+정의된 OBJECT(와 VARIABLE에 저장된 값)로 BODY를 실행한다. 흥미로운 점은 BODY의 시작과 끝에 특별 메소드 OBJECT.__enter__()과 OBJECT.__exit__()이 자동적으로 불러와지며; 이는 BODY가 예외를 발생시켜도 마찬가지다. 이를 통해 Coverage.__enter__()가 추적을 자동적으로 키고 Coverage.__exit__()가 추적을 다시 자동으로 끄는 Coverage 객체를 정의할 수 있다. 추적 후, 커버리지에 접근하기 위한 특별한 메소드를 사용할 수 있다. 이것이 사용 도중에 특별 메소드가 어떻게 보이는지이다:
+
+```python
+with Coverage() as cov:
+    function_to_be_traced()
+c = cov.coverage()
+```
+
+여기서, 추적은 function_to_be_traced()에서 자동적으로 켜지고 with 블럭 후에 다시 꺼진다; 그 이후 실행된 줄의 집합에 접근할 수 있다.
+
+여기 모든 부가 기능들의 전체 구현이다. 여러분은 전체를 알 필요는 없고; 어떻게 사용하는지만 알면 충분하다.
+
+```python
+Location = Tuple[str, int]
+```
+
+```python
+class Coverage:
+    """Track coverage within a `with` block. Use as
+    ```
+    with Coverage() as cov:
+        function_to_be_traced()
+    c = cov.coverage()
+    ```
+    """
+
+    def __init__(self) -> None:
+        """Constructor"""
+        self._trace: List[Location] = []
+
+    # Trace function
+    def traceit(self, frame: FrameType, event: str, arg: Any) -> Optional[Callable]:
+        """Tracing function. To be overloaded in subclasses."""
+        if self.original_trace_function is not None:
+            self.original_trace_function(frame, event, arg)
+
+        if event == "line":
+            function_name = frame.f_code.co_name
+            lineno = frame.f_lineno
+            if function_name != '__exit__':  # avoid tracing ourselves:
+                self._trace.append((function_name, lineno))
+
+        return self.traceit
+
+    def __enter__(self) -> Any:
+        """Start of `with` block. Turn on tracing."""
+        self.original_trace_function = sys.gettrace()
+        sys.settrace(self.traceit)
+        return self
+
+    def __exit__(self, exc_type: Type, exc_value: BaseException,
+                 tb: TracebackType) -> Optional[bool]:
+        """End of `with` block. Turn off tracing."""
+        sys.settrace(self.original_trace_function)
+        return None  # default: pass all exceptions
+
+    def trace(self) -> List[Location]:
+        """The list of executed lines, as (function_name, line_number) pairs"""
+        return self._trace
+
+    def coverage(self) -> Set[Location]:
+        """The set of executed lines, as (function_name, line_number) pairs"""
+        return set(self.trace())
+
+    def function_names(self) -> Set[str]:
+        """The set of function names seen"""
+        return set(function_name for (function_name, line_number) in self.coverage())
+
+    def __repr__(self) -> str:
+        """Return a string representation of this object.
+           Show covered (and uncovered) program code"""
+        t = ""
+        for function_name in self.function_names():
+            # Similar code as in the example above
+            try:
+                fun = eval(function_name)
+            except Exception as exc:
+                t += f"Skipping {function_name}: {exc}"
+                continue
+
+            source_lines, start_line_number = inspect.getsourcelines(fun)
+            for lineno in range(start_line_number, start_line_number + len(source_lines)):
+                if (function_name, lineno) not in self.trace():
+                    t += "# "
+                else:
+                    t += "  "
+                t += "%2d  " % lineno
+                t += source_lines[lineno - start_line_number]
+
+        return t
+```
+
+이제 이걸 사용해보자:
+
+```python
+with Coverage() as cov:
+    cgi_decode("a+b")
+
+print(cov.coverage())
+```
+
+> {('cgi_decode', 20), ('cgi_decode', 10), ('cgi_decode', 32), ('cgi_decode', 16), ('cgi_decode', 12), ('cgi_decode', 19), ('cgi_decode', 9), ('cgi_decode', 15), ('cgi_decode', 31), ('cgi_decode', 18), ('cgi_decode', 8), ('cgi_decode', 21), ('cgi_decode', 11), ('cgi_decode', 17), ('cgi_decode', 30)}
+
+보이다시피, Coverage() 클래스는 실행된 줄을 추적할 뿐만 아니라 함수 이름또한 추적한다. 이는 여러 파일에 묶인 프로그램을 가지고 있을 경우 유용하다.
+
+상호작용적 사용을 위해, 단순히 커버리지 객체를 출력하고, 코드의 목록을 얻을 수 있으며, 커버되지 않은 줄을 #으로 표시한다.
+
+```python
+print(cov)
+```
+
+> ```
+> #  1  def cgi_decode(s: str) -> str:
+> #  2      """Decode the CGI-encoded string `s`:
+> #  3         * replace '+' by ' '
+> #  4         * replace "%xx" by the character with hex number xx.
+> #  5         Return the decoded string.  Raise `ValueError` for invalid inputs."""
+> #  6  
+> #  7      # Mapping of hex digits to their integer values
+>    8      hex_values = {
+>    9          '0': 0, '1': 1, '2': 2, '3': 3, '4': 4,
+>   10          '5': 5, '6': 6, '7': 7, '8': 8, '9': 9,
+>   11          'a': 10, 'b': 11, 'c': 12, 'd': 13, 'e': 14, 'f': 15,
+>   12          'A': 10, 'B': 11, 'C': 12, 'D': 13, 'E': 14, 'F': 15,
+> # 13      }
+> # 14  
+>   15      t = ""
+>   16      i = 0
+>   17      while i < len(s):
+>   18          c = s[i]
+>   19          if c == '+':
+>   20              t += ' '
+>   21          elif c == '%':
+> # 22              digit_high, digit_low = s[i + 1], s[i + 2]
+> # 23              i += 2
+> # 24              if digit_high in hex_values and digit_low in hex_values:
+> # 25                  v = hex_values[digit_high] * 16 + hex_values[digit_low]
+> # 26                  t += chr(v)
+> # 27              else:
+> # 28                  raise ValueError("Invalid encoding")
+> # 29          else:
+>   30              t += c
+>   31          i += 1
+>   32      return t
+> ```
+
+## Comparing Coverage
+
+실행된 줄의 집합으로 커버리지를 표현했기 때문에, 여기에 집합 operation들을 기쁘게 적용할 수 있다. 예를 들어, 개별적인 테스트 케이스로 커버되는 줄과 그렇지 않은 줄을 찾아낼 수 있다:
+
+```python
+with Coverage() as cov_plus:
+    cgi_decode("a+b")
+with Coverage() as cov_standard:
+    cgi_decode("abc")
+
+cov_plus.coverage() - cov_standard.coverage()
+```
+
+> {('cgi_decode', 20)}
+
+이 결과가 오직 'a+b' 입력에서만 실행되는 코드 내의 단 하나의 줄이다.
+
+또한 어떤 줄이 여전히 커버되어져야하는지 집합을 비교함으로써 찾아낼 수 있다. cov_max를 우리가 달성할 수 있는 최대 커버리지로 정의하자. (여기서, 우리는 우리가 이미 가졌던 "좋은" 테스트 케이스를 실행함으로써 하게된다. 실제로는, [the chapter on symbolic testing](/Part4/Symbolic%20Fuzzing.md)에서 소개한 코드 구조를 정적으로 분석하는 이 바로 그 테스트 케이스이다.)
+
+```python
+with Coverage() as cov_max:
+    cgi_decode('+')
+    cgi_decode('%20')
+    cgi_decode('abc')
+    try:
+        cgi_decode('%?a')
+    except Exception:
+        pass
+```
+
+그 다음, 어떤 줄이 아직 테스트 케이스에 의해 커버되지 않았는지 쉽게 볼 수 있다:
+
+> {('cgi_decode', 22),
+>  ('cgi_decode', 23),
+>  ('cgi_decode', 24),
+>  ('cgi_decode', 25),
+>  ('cgi_decode', 26),
+>  ('cgi_decode', 28)}
+
+다시 말해 이는 아직까지 입력으로 가지지 않은 "%xx"를 다루는 줄이다.
+
+## Coverage of Basic Fuzzing
